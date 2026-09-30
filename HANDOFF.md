@@ -64,11 +64,18 @@ per-visitor isolation across two separate browser profiles, and restart-induced 
 
 ## Known, disclosed limitations (not blockers)
 
-- **Hinglish/Hindi TTS and transcription accuracy were never independently verified on the dev
-  machine** — no Hindi TTS voice was available locally to generate a synthetic test sample (Gate
-  4). The live pipeline works (English verified end-to-end, Hinglish transcription was improved
-  with a context-prompt fix per `tasks.md` Gate 4), but true Hindi/Hinglish quality depends on the
-  user's own live testing, which happened during Gate 4/6 rather than an automated check.
+- **BUD's spoken output is English-only** — `canopylabs/orpheus-v1-english` is structurally
+  English-only (Groq's full model catalog offers only that and an Arabic-Saudi variant, no
+  Hindi). Confirmed via live user testing post-Gate-6. Real alternatives (Sarvam AI's
+  Saarika+Bulbul, purpose-built for Hindi-English code-switching; self-hosted Piper, TTS-only)
+  were researched and presented; **the user explicitly chose to keep the current Groq-only setup
+  as-is** rather than adopt either. See `docs/scope.md` for the full reasoning — don't silently
+  change this.
+- **Pure/heavy Hindi speech understanding (Whisper) is unreliable** — the transcription context
+  prompt (`transcribe.py`) was tuned in Gate 4 specifically for *Hinglish code-switching* and
+  explicitly asks for Romanized Hindi, which plausibly biases heavier Hindi speech toward an
+  English/Latin-script framing. A real, plausible hypothesis from live user feedback, not yet
+  fixed or independently confirmed — the user chose not to change anything in this session.
 - **Retention is best-effort on the free Render tier**, not indefinite — disclosed in the UI and
   in `docs/scope.md`. Upgrading to a paid Render plan and adding a persistent disk (see
   `docs/deploy.md`'s "Architecture" section) would restore true indefinite retention if ever
