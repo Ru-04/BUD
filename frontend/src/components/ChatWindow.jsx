@@ -106,7 +106,6 @@ export default function ChatWindow({ composerMode, onComposerModeChange, onMemor
       inFlight.current = false;
       setPending(false);
     }
-    if (reply && !muted) await speakReply(reply);
     return reply;
   }
 
@@ -115,8 +114,12 @@ export default function ChatWindow({ composerMode, onComposerModeChange, onMemor
     const message = draft.trim();
     if (!message) return;
     const reply = await sendMessage(message);
+    // Clear the composer as soon as the reply is known -- don't make the box wait for BUD to
+    // finish speaking, which can take several seconds and previously left the old text sitting
+    // there (editable again, since `pending` clears before speech does) until playback ended.
     if (reply !== null) setDraft('');
     input.current?.focus();
+    if (reply && !muted) speakReply(reply); // fire-and-forget: text mode doesn't wait on this
   }
 
   function reset() {
@@ -135,7 +138,10 @@ export default function ChatWindow({ composerMode, onComposerModeChange, onMemor
   // while BUD replies, then the view returns to a ready-to-talk-again state.
   async function handleTranscribed(text) {
     setVoicePhase('processing');
-    await sendMessage(text);
+    const reply = await sendMessage(text);
+    // Voice mode, unlike text mode, deliberately waits for BUD to finish speaking before
+    // becoming ready to record again, so the mic doesn't reopen mid-reply.
+    if (reply && !muted) await speakReply(reply);
     setVoicePhase('ready');
   }
 

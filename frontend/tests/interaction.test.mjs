@@ -173,6 +173,37 @@ test('finishing a recording sends it immediately in pure voice mode, with no edi
   }
 });
 
+test('voice mode waits for BUD to finish speaking before offering to record again', async () => {
+  // Unlike text mode, voice mode deliberately stays busy until speech playback actually ends,
+  // so the mic doesn't reopen while BUD is still talking -- protects the split between text
+  // mode's "clear immediately" fix and voice mode's intentional "wait for speech" behavior.
+  installFakeMediaRecorder();
+  const fakeAudio = installFakeAudio();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (url.includes('/api/transcribe')) return new Response(JSON.stringify({ transcript: 'Hello', language: 'english' }), { status: 200 });
+    if (url.includes('/api/speak')) return new Response(new Blob(['fake wav bytes'], { type: 'audio/wav' }), { status: 200 });
+    return new Response(JSON.stringify({ reply: 'Hi there!', mode: 'VIBE' }), { status: 200 });
+  };
+  try {
+    const mod = await loadModule('/src/components/ChatWindow.jsx');
+    render(React.createElement(mod.default, { composerMode: 'voice', onComposerModeChange: () => {}, muted: false }));
+    await waitFor(() => assert.ok(screen.getByRole('group', { name: 'Voice recording' })));
+
+    fireEvent.click(screen.getByText('Done'));
+    await waitFor(() => assert.equal(fakeAudio.instances.length, 1, 'speech should have started'));
+
+    // Still speaking -- must not yet be back to "ready to record again".
+    assert.equal(screen.queryByText('Tap to talk'), null, 'must not be ready again while still speaking');
+
+    fakeAudio.instances[0].onended();
+    await waitFor(() => assert.ok(screen.getByText('Tap to talk')));
+  } finally {
+    cleanup();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('cancelling mid-recording in voice mode returns to a ready-to-talk state, not text mode', async () => {
   installFakeMediaRecorder();
   const originalFetch = globalThis.fetch;
@@ -272,6 +303,36 @@ test('Parameters opens the existing personality controls in an overlay', async (
     fireEvent.click(screen.getByText('Parameters'));
     await waitFor(() => assert.ok(screen.getByRole('dialog', { name: 'Parameters' })));
     assert.ok(screen.getByText('Warmth'), 'personality sliders are shown, expanded, inside the overlay');
+  } finally {
+    cleanup();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the composer clears as soon as the reply arrives, without waiting for speech to finish', async () => {
+  // Regression test: the composer previously stayed re-editable-but-still-full of the old
+  // message until BUD finished speaking, because clearing it was awaited on the same promise
+  // as TTS playback -- forcing the user to manually delete old text before typing the next
+  // message. It must clear the moment the reply is known, not once BUD stops talking.
+  const fakeAudio = installFakeAudio();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async url => {
+    if (url.includes('/api/speak')) return new Response(new Blob(['fake wav bytes'], { type: 'audio/wav' }), { status: 200 });
+    return new Response(JSON.stringify({ reply: 'Hey there!', mode: 'VIBE' }), { status: 200 });
+  };
+  try {
+    const mod = await loadModule('/src/components/ChatWindow.jsx');
+    render(React.createElement(mod.default, {
+      composerMode: 'text', onComposerModeChange: () => {}, muted: false, onSpeakingChange: () => {},
+    }));
+    const textarea = screen.getByPlaceholderText(/Tell BUD what/);
+    fireEvent.change(textarea, { target: { value: 'Hi' } });
+    fireEvent.click(screen.getByLabelText('Send message'));
+
+    await waitFor(() => assert.ok(screen.getByText('Hey there!')));
+    // Speech is still in flight (never fired onended) -- the composer must already be clear.
+    assert.equal(fakeAudio.instances.length, 1, 'speech should have started');
+    assert.equal(textarea.value, '', 'the composer must clear without waiting for speech to finish');
   } finally {
     cleanup();
     globalThis.fetch = originalFetch;
