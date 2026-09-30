@@ -179,7 +179,7 @@ export default function ChatWindow({ composerMode, onComposerModeChange, onMemor
           )}
           {error && <p className="chat-error" role="alert">{error}</p>}
           {speakError && <p className="speak-note" role="status">🔇 {speakError}</p>}
-          <p className="local-note">Messages and recent context go to Groq to generate replies. This tab’s visible conversation clears on refresh, but your messages, preferences, and any approved memories are stored on BUD’s server, tied to this device, and kept indefinitely — you can forget individual memories any time in Parameters. Groq’s own data policies apply. BUD is an AI, not a therapist or emergency service.</p>
+          <p className="local-note">Messages and recent context go to Groq to generate replies. This tab’s visible conversation clears on refresh, and — on this demo’s free hosting tier — server-stored preferences and memories may be cleared whenever the server restarts, so don’t rely on them sticking around. You can forget individual memories any time in Parameters. Groq’s own data policies apply. BUD is an AI, not a therapist or emergency service.</p>
         </div>
         <div className="voice-column voice-column-orb">
           <div className="orb-card"><BudOrb state={orbState} /></div>
@@ -209,6 +209,6 @@ export default function ChatWindow({ composerMode, onComposerModeChange, onMemor
     </form>
     {error && <p className="chat-error" role="alert">{error}</p>}
     {speakError && <p className="speak-note" role="status">🔇 {speakError}</p>}
-    <p className="local-note">Messages and recent context go to Groq to generate replies. This tab’s visible conversation clears on refresh, but your messages, preferences, and any approved memories are stored on BUD’s server, tied to this device, and kept indefinitely — you can forget individual memories any time in Parameters. Groq’s own data policies apply. BUD is an AI, not a therapist or emergency service.</p>
+    <p className="local-note">Messages and recent context go to Groq to generate replies. This tab’s visible conversation clears on refresh, and — on this demo’s free hosting tier — server-stored preferences and memories may be cleared whenever the server restarts, so don’t rely on them sticking around. You can forget individual memories any time in Parameters. Groq’s own data policies apply. BUD is an AI, not a therapist or emergency service.</p>
   </div>;
 }

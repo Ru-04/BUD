@@ -23,14 +23,13 @@ services:
         value: whisper-large-v3
       - key: GROQ_TTS_MODEL
         value: canopylabs/orpheus-v1-english
-      - key: DATABASE_PATH
-        value: /var/data/bud.db
       - key: FRONTEND_ORIGIN
         value: REPLACE_WITH_FRONTEND_URL_AFTER_FIRST_DEPLOY
-    disk:
-      name: bud-data
-      mountPath: /var/data
-      sizeGB: 1
+    # No `disk:` block: the free plan doesn't support persistent disks (confirmed live in the
+    # Render dashboard), and the user chose to stay free rather than upgrade -- so SQLite data
+    # does not survive a restart on this deployment. See docs/deploy.md for the full context.
+    # If retention ever needs to be durable, upgrade the plan, add a disk here, and set
+    # DATABASE_PATH to a path under its mountPath.
 
   - type: web
     name: bud-frontend
