@@ -1,0 +1,13 @@
+.env
+backend.env
+**/.env
+**/.venv/
+**/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+**/dist/
+**/data/
+*.db
+*.wav
+*.webm
+backend/uvicorn.log

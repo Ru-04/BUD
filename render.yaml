@@ -1,0 +1,43 @@
+# Best-effort Render Blueprint for BUD. Render's Blueprint spec can change; if `render blueprint`
+# rejects this or behaves unexpectedly, fall back to the manual dashboard steps in
+# docs/deploy.md, which are the authoritative instructions for this deployment.
+#
+# Two placeholder values below (FRONTEND_ORIGIN, VITE_API_BASE_URL) can't be known until each
+# service has been created once and has a URL -- fill them in via the Render dashboard after the
+# first deploy of both services, then manually redeploy the backend. See docs/deploy.md step 3.
+services:
+  - type: web
+    name: bud-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.6
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_CHAT_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_WHISPER_MODEL
+        value: whisper-large-v3
+      - key: GROQ_TTS_MODEL
+        value: canopylabs/orpheus-v1-english
+      - key: DATABASE_PATH
+        value: /var/data/bud.db
+      - key: FRONTEND_ORIGIN
+        value: REPLACE_WITH_FRONTEND_URL_AFTER_FIRST_DEPLOY
+    disk:
+      name: bud-data
+      mountPath: /var/data
+      sizeGB: 1
+
+  - type: web
+    name: bud-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: REPLACE_WITH_BACKEND_URL_AFTER_FIRST_DEPLOY
