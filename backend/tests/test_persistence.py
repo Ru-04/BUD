@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app import db
 from app.main import app
 from app.schemas import ChatRequest, DEFAULT_PREFERENCES
+from app.services import chat as chat_module
 from app.services.chat import ChatError, chat
 from app.services.groq import ProviderError, get_provider
 from app.services.policy import _band, effective_sliders
@@ -235,10 +236,21 @@ def test_chat_includes_approved_memories_in_prompt():
     assert "Prefers short, direct answers" in system
 
 
-def test_chat_proposes_memory_candidate_when_extractor_agrees():
+def test_chat_proposes_memory_candidate_on_the_next_turn_not_the_same_one():
+    # Extraction runs in the background after the reply is sent (a latency optimization -- it
+    # never blocks the user's reply), so it can't appear in the same turn's response; it's
+    # persisted once the background task finishes and surfaces on the *next* normal turn.
     db.init_db()
     provider = FakeProvider(analysis_json("LISTEN"), "Good to know.", proposal_json())
-    result = asyncio.run(chat(request("I really prefer direct feedback."), provider, owner_token_hash="owner-1"))
+
+    async def _drive():
+        first = await chat(request("I really prefer direct feedback."), provider, owner_token_hash="owner-1")
+        assert first.memory_candidate is None
+        await asyncio.gather(*chat_module._background_tasks, return_exceptions=True)
+        second_provider = FakeProvider(analysis_json("LISTEN"), "Sure thing.")
+        return await chat(request("Another message."), second_provider, owner_token_hash="owner-1")
+
+    result = asyncio.run(_drive())
     assert result.memory_candidate is not None
     assert result.memory_candidate.content == "Prefers direct feedback"
     assert db.get_memory_candidate(str(result.memory_candidate.id), "owner-1", "2020-01-01T00:00:00+00:00") is not None
@@ -255,9 +267,18 @@ def test_chat_skips_memory_extraction_when_sensitivity_is_not_normal():
 def test_chat_memory_extraction_failure_does_not_break_reply():
     db.init_db()
     provider = FakeProvider(analysis_json("LISTEN"), "A reply", ProviderError("PROVIDER_ERROR", "boom"))
-    result = asyncio.run(chat(request("Just checking in."), provider, owner_token_hash="owner-1"))
+
+    async def _drive():
+        result = await chat(request("Just checking in."), provider, owner_token_hash="owner-1")
+        # The background extraction task fails after the reply is already returned -- confirm
+        # it doesn't raise into the event loop unhandled, and confirm no candidate got created.
+        await asyncio.gather(*chat_module._background_tasks, return_exceptions=True)
+        return result
+
+    result = asyncio.run(_drive())
     assert result.reply == "A reply"
     assert result.memory_candidate is None
+    assert db.get_latest_pending_candidate("owner-1", "2099-01-01T00:00:00+00:00") is None
 
 
 # --- preferences routes ---------------------------------------------------

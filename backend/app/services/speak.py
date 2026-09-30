@@ -1,3 +1,4 @@
+import asyncio
 import io
 import re
 import wave
@@ -83,7 +84,15 @@ def _concatenate_wav(clips: list[bytes]) -> bytes:
     try:
         out = io.BytesIO()
         writer = wave.open(out, "wb")
-        writer.setparams(readers[0].getparams())
+        first = readers[0]
+        # Set channel/width/rate individually rather than writer.setparams(first.getparams()):
+        # Groq's Orpheus responses declare a placeholder nframes (2**31 - 1, a streaming-response
+        # sentinel, not the real length). Carrying that into the output header via setparams()
+        # makes the final RIFF size calculation overflow a 32-bit field once real data is
+        # written. Leaving nframes unset lets wave derive it from what's actually written.
+        writer.setnchannels(first.getnchannels())
+        writer.setsampwidth(first.getsampwidth())
+        writer.setframerate(first.getframerate())
         for reader in readers:
             writer.writeframes(reader.readframes(reader.getnframes()))
         writer.close()
@@ -102,7 +111,10 @@ async def speak(text: str, *, transport=None) -> bytes:
     if not chunks:
         raise ProviderError("INVALID_REQUEST", "No text to speak.", 422)
     async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=5), transport=transport) as client:
-        clips = [await _speak_chunk(client, key, model, chunk) for chunk in chunks]
+        # Chunks are independent Orpheus calls (Groq's 200-char-per-call limit forces splitting
+        # long replies) -- run them concurrently instead of one-at-a-time so a multi-chunk reply
+        # doesn't wait for N sequential network round trips before BUD starts speaking.
+        clips = list(await asyncio.gather(*(_speak_chunk(client, key, model, chunk) for chunk in chunks)))
     try:
         return _concatenate_wav(clips)
     except wave.Error:

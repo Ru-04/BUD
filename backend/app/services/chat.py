@@ -12,6 +12,11 @@ from app.services.state import analyze, explicit_mode, unclear
 
 CLARIFY = "Would you like me to just listen, or help you think through what to do next?"
 
+# Holds references to in-flight background memory-extraction tasks so asyncio doesn't garbage
+# collect (and silently cancel) them once the request that spawned them has already returned --
+# a known asyncio pitfall for fire-and-forget tasks. Tests await this set to observe completion.
+_background_tasks: set[asyncio.Task] = set()
+
 
 class ChatError(ProviderError):
     """A request-level chat error (e.g. session ownership), sharing ProviderError's sanitized envelope."""
@@ -19,6 +24,29 @@ class ChatError(ProviderError):
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _run_in_background(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+async def _extract_and_store_memory(provider, message: str, reply: str, memories: list[dict], owner_token_hash: str) -> None:
+    # Fire-and-forget, started only after the user's reply has already been sent -- a slow or
+    # failed extraction here never adds to the reply's latency. Best-effort by design, same as
+    # the old inline behaviour: a failure just means no memory gets proposed this turn.
+    try:
+        async with asyncio.timeout(8):
+            proposal = await propose_memory(provider, message, reply, memories)
+    except (TimeoutError, ProviderError):
+        return
+    if not proposal:
+        return
+    candidate_id = str(uuid4())
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    db.create_memory_candidate(candidate_id, owner_token_hash, proposal.content, proposal.category, _now(), expires_at)
 
 
 async def chat(request, provider, owner_token_hash: str | None = None) -> ChatResponse:
@@ -56,16 +84,14 @@ async def chat(request, provider, owner_token_hash: str | None = None) -> ChatRe
                     ])
                     memory_candidate = None
                     if owner_token_hash and sensitivity == "normal":
-                        try:
-                            async with asyncio.timeout(8):
-                                proposal = await propose_memory(provider, request.message, reply, memories)
-                        except TimeoutError:
-                            proposal = None
-                        if proposal:
-                            candidate_id = str(uuid4())
-                            expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-                            db.create_memory_candidate(candidate_id, owner_token_hash, proposal.content, proposal.category, _now(), expires_at)
-                            memory_candidate = MemoryCandidate(id=candidate_id, content=proposal.content, category=proposal.category)
+                        # Surface a candidate a previous turn's background extraction already
+                        # found, if one's waiting; otherwise kick off this turn's extraction in
+                        # the background so it never delays this reply -- it'll surface next turn.
+                        pending = db.get_latest_pending_candidate(owner_token_hash, _now())
+                        if pending:
+                            memory_candidate = MemoryCandidate(id=pending["id"], content=pending["content"], category=pending["category"])
+                        else:
+                            _run_in_background(_extract_and_store_memory(provider, request.message, reply, memories, owner_token_hash))
                     result = ChatResponse(reply=reply, mode=mode, sensitivity=sensitivity, memory_candidate=memory_candidate)
         except TimeoutError:
             raise ProviderError("PROVIDER_TIMEOUT", "BUD's provider took too long. Please try again.", 504) from None

@@ -137,6 +137,18 @@ def get_memory_candidate(candidate_id: str, owner_token_hash: str, now: str) -> 
         return dict(row) if row else None
 
 
+def get_latest_pending_candidate(owner_token_hash: str, now: str) -> dict | None:
+    """The most recent unresolved (not approved/rejected/expired) candidate for this owner, if
+    any -- used to surface a candidate extracted in the background on a later turn."""
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT id, content, category FROM memory_candidates WHERE owner_token_hash = ? AND expires_at > ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (owner_token_hash, now),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def approve_memory_candidate(candidate_id: str, owner_token_hash: str, approved_at: str) -> str | None:
     """Moves an unexpired candidate into approved memories. Returns the new memory id, or None if not found/not owned/expired."""
     with connection() as conn:

@@ -1,5 +1,6 @@
 import asyncio
 import io
+import struct
 import wave
 
 import httpx
@@ -19,6 +20,16 @@ def make_wav(seconds_of_silence=1, framerate=8000):
         writer.setframerate(framerate)
         writer.writeframes(b"\x00\x00" * framerate * seconds_of_silence)
     return buf.getvalue()
+
+
+def make_streaming_wav(seconds_of_silence=1, framerate=8000):
+    """Mimics Groq's real Orpheus responses: the data-chunk size in the header is a placeholder
+    (2**31 - 1, a streaming-response sentinel), not the real length -- the audio bytes themselves
+    are complete and correct, only the declared size lies. Byte offset 40 is the data-chunk size
+    field in the canonical 44-byte PCM header `wave` writes (no extra chunks)."""
+    clip = bytearray(make_wav(seconds_of_silence, framerate))
+    struct.pack_into("<L", clip, 40, 2**31 - 1)
+    return bytes(clip)
 
 
 @pytest.fixture
@@ -103,6 +114,44 @@ def test_multi_chunk_reply_is_stitched_into_one_playable_wav(configured):
         # Each chunk contributed 1 second of audio at 8000Hz; concatenation must sum the frames,
         # not just return the first/last clip.
         assert combined.getnframes() == 8000 * len(calls)
+
+
+def test_concatenation_survives_orpheus_placeholder_length_header(configured):
+    # Regression test for a real bug found via live testing: Groq's actual Orpheus responses
+    # declare a placeholder data size (2**31 - 1) rather than the real length. The old code
+    # carried that straight into the output header via writer.setparams(first.getparams()),
+    # which overflowed the final RIFF size calculation once real multi-chunk data was written --
+    # every BUD reply over 200 characters was silently crashing /api/speak. Mocked tests never
+    # caught this because they used correctly-sized synthetic WAVs, not this real quirk.
+    clip = make_streaming_wav(seconds_of_silence=1)
+
+    def respond(req):
+        return httpx.Response(200, content=clip, headers={"content-type": "audio/wav"})
+
+    long_text = " ".join(f"This is sentence number {i} with a bit of padding text." for i in range(10))
+    result = asyncio.run(speak(long_text, transport=httpx.MockTransport(respond)))
+
+    with wave.open(io.BytesIO(result), "rb") as combined:
+        assert 0 < combined.getnframes() < 2**31, "the placeholder length must not carry through to the output header"
+
+
+def test_chunks_are_synthesized_concurrently_not_one_at_a_time(configured):
+    # Regression test: chunk requests used to be awaited sequentially in a loop, so a multi-chunk
+    # reply paid N full network round-trips back to back. Confirms they now overlap in flight.
+    in_flight = 0
+    max_in_flight = 0
+
+    async def respond(req):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+        return httpx.Response(200, content=make_wav(), headers={"content-type": "audio/wav"})
+
+    long_text = " ".join(f"This is sentence number {i} with a bit of padding text." for i in range(10))
+    asyncio.run(speak(long_text, transport=httpx.MockTransport(respond)))
+    assert max_in_flight > 1, "chunk requests must overlap in flight, not run one at a time"
 
 
 @pytest.mark.parametrize("status,code", [(401, "PROVIDER_AUTH"), (403, "PROVIDER_AUTH"), (429, "PROVIDER_RATE_LIMIT"), (500, "PROVIDER_ERROR")])
