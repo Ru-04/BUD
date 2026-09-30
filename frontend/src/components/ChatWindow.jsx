@@ -191,7 +191,7 @@ export default function ChatWindow({ composerMode, onComposerModeChange, onMemor
   return <div className="chat-window">
     <div className="chat-heading"><span>THIS CONVERSATION</span><button className="reset" onClick={reset} disabled={pending}>Clear chat</button></div>
     <div className="messages" role="log" aria-label="Conversation" aria-live="polite">
-      {turns.length === 0 && <p className="empty-chat">What’s on your mind? You can write or talk, in English or Hinglish.</p>}
+      {turns.length === 0 && <p className="empty-chat">What’s on your mind? You can write or talk.</p>}
       {turns.map((turn, index) => <article key={index} className={`message ${turn.role}`}>
         <span className="message-author">{turn.role === 'user' ? 'You' : `BUD · ${turn.mode.replaceAll('_', ' ')}`}</span>
         <p>{turn.content}</p>
