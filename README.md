@@ -1,6 +1,6 @@
 # BUD — Your All-Time Buddy
 
-A private, nonjudgmental AI companion that talks and listens in English and Hinglish, adapts to what you actually need in the moment, and remembers you only with your explicit permission.
+A private, nonjudgmental AI companion that talks and listens in English , adapts to what you actually need in the moment, and remembers you only with your explicit permission.
 
 **Live demo:** [bud-frontend.onrender.com](https://bud-frontend.onrender.com/)
 *(Free-tier hosting: the first request after a period of inactivity can take 30–60 seconds to wake up — that's the host, not a bug.)*
